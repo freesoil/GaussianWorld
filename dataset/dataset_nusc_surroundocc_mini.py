@@ -5,10 +5,12 @@ import pickle
 from mmcv.image.io import imread
 from pyquaternion import Quaternion
 from . import OPENOCC_DATASET
+import json
+from nuscenes.nuscenes import NuScenes
 
 
 @OPENOCC_DATASET.register_module()
-class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
+class NuScenes_Scene_SurroundOcc_Dataset_Mini(data.Dataset):
     def __init__(
         self,
         data_path,
@@ -18,22 +20,98 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
         imageset=None,
         phase='train',
         scene_name=None,
+        version='v1.0-mini'
         ):
-        with open(imageset, 'rb') as f:
-            data = pickle.load(f)
-
-        self.nusc_infos = data['infos']
+        
+        # Load NuScenes mini dataset directly
+        self.nusc = NuScenes(version=version, dataroot=data_path, verbose=True)
+        
+        # Get scenes
         self.data_path = data_path
         self.num_frames = num_frames
         self.grid_size_occ = np.array(grid_size_occ).astype(np.uint32)
         self.empty_idx = empty_idx
         self.phase = phase
-        if scene_name is None:
-            self.scene_names = list(self.nusc_infos.keys())
+        
+        # Get scenes based on validation or training split
+        scenes = self.nusc.scene
+        if phase == 'val':
+            self.scene_names = [scene['name'] for scene in scenes[:5]]  # Use first half for val
         else:
+            self.scene_names = [scene['name'] for scene in scenes[5:]]  # Use second half for train
+            
+        if scene_name is not None:
             self.scene_names = [scene_name]
-        self.scene_lens = [len(self.nusc_infos[sn]) for sn in self.scene_names]
+            
+        # Setup scene info
+        self.scene_data = {}
+        for scene_name in self.scene_names:
+            scene_token = None
+            for scene in scenes:
+                if scene['name'] == scene_name:
+                    scene_token = scene['token']
+                    break
+            
+            if scene_token:
+                self.scene_data[scene_name] = self.get_scene_frames(scene_token)
+        
+        self.scene_lens = [len(self.scene_data[sn]) for sn in self.scene_names]
         self.scene_name_table, self.scene_idx_table = self.get_scene_index(scene_name)
+
+    def get_scene_frames(self, scene_token):
+        """Extract all frames from a scene"""
+        scene = self.nusc.get('scene', scene_token)
+        sample_token = scene['first_sample_token']
+        
+        frames = []
+        while sample_token:
+            sample = self.nusc.get('sample', sample_token)
+            frame_info = {
+                'token': sample_token,
+                'timestamp': sample['timestamp'],
+                'lidar_path': self.nusc.get('sample_data', sample['data']['LIDAR_TOP'])['filename'],
+                'cams': {},
+                'lidar2ego_rotation': [0, 0, 0, 1],  # Default quaternion identity
+                'lidar2ego_translation': [0, 0, 0],
+                'ego2global_rotation': [0, 0, 0, 1],  # Default quaternion identity
+                'ego2global_translation': [0, 0, 0],
+                'sweeps': []
+            }
+            
+            # Get pose info
+            lidar_sample = self.nusc.get('sample_data', sample['data']['LIDAR_TOP'])
+            lidar_pose = self.nusc.get('ego_pose', lidar_sample['ego_pose_token'])
+            
+            # Update proper poses
+            frame_info['ego2global_rotation'] = lidar_pose['rotation']
+            frame_info['ego2global_translation'] = lidar_pose['translation']
+            
+            # Get calibrated sensor info for lidar
+            calib = self.nusc.get('calibrated_sensor', lidar_sample['calibrated_sensor_token'])
+            frame_info['lidar2ego_rotation'] = calib['rotation']
+            frame_info['lidar2ego_translation'] = calib['translation']
+            
+            # Get cameras
+            for cam_name in ['CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_FRONT_LEFT', 'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT']:
+                if cam_name in sample['data']:
+                    cam_token = sample['data'][cam_name]
+                    cam_sample = self.nusc.get('sample_data', cam_token)
+                    cam_path = cam_sample['filename']
+                    
+                    # Get calibration info
+                    cam_calib = self.nusc.get('calibrated_sensor', cam_sample['calibrated_sensor_token'])
+                    
+                    frame_info['cams'][cam_name] = {
+                        'data_path': os.path.join(self.data_path, cam_path),
+                        'sensor2lidar_rotation': cam_calib['rotation'],
+                        'sensor2lidar_translation': np.array(cam_calib['translation']),
+                        'cam_intrinsic': np.array(cam_calib['camera_intrinsic'])
+                    }
+            
+            frames.append(frame_info)
+            sample_token = sample['next']
+            
+        return frames
 
     def __len__(self):
         'Denotes the total number of scenes'
@@ -44,9 +122,11 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
         sample_idx = self.scene_idx_table[index]
         imgs_seq, metas_seq, occ_seq = [], [], []
         prev_lidar2global = None
+        
         for i in range(self.num_frames):
-            info = self.nusc_infos[scene_name][i + sample_idx]
+            info = self.scene_data[scene_name][i + sample_idx]
             data_info = self.get_data_info(info)
+            
             # load image
             imgs = []
             for filename in data_info['img_filename']:
@@ -66,16 +146,16 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
                             if matches:
                                 img = imread(matches[0], 'unchanged').astype(np.float32)
                             else:
-                                print(f"No matching files found for {filename}, creating empty image")
-                                img = np.zeros((864, 1600, 3), dtype=np.float32)
+                                raise FileNotFoundError(f"No matching files found for {filename}")
                         else:
-                            print(f"Invalid filename pattern: {filename}, creating empty image")
-                            img = np.zeros((864, 1600, 3), dtype=np.float32)
+                            raise FileNotFoundError(f"Invalid filename pattern: {filename}")
+                    
+                    imgs.append(img)
                 except Exception as e:
-                    print(f"Error loading image {filename}: {e}, creating empty image")
-                    img = np.zeros((864, 1600, 3), dtype=np.float32)
-                
-                imgs.append(img)
+                    print(f"Error loading image {filename}: {e}")
+                    # Create a dummy image as placeholder with correct dimensions 
+                    # Use the dimensions specified in the config file (864x1600)
+                    imgs.append(np.zeros((864, 1600, 3), dtype=np.float32))
             
             # Check if we have the expected number of cameras (6)
             if len(imgs) < 6:
@@ -83,11 +163,12 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
                 print(f"Warning: Only found {len(imgs)} camera images, padding to 6...")
                 for _ in range(6 - len(imgs)):
                     imgs.append(np.zeros((864, 1600, 3), dtype=np.float32))
-                    
+            
+            # Stack the images
             imgs_seq.append(np.stack(imgs, 0))
+            
             # load metas
             metas = {'scene_name': scene_name}
-            
             # Ensure proper formatting of lidar2img
             # Check if we have enough transformation matrices
             if len(data_info['lidar2img']) < 6:
@@ -99,12 +180,13 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
                 metas['lidar2img'] = padded_transforms
             else:
                 metas['lidar2img'] = data_info['lidar2img']
-                
             if prev_lidar2global is not None:
                 metas['lidar2global'] = [prev_lidar2global, data_info['lidar2global']]
             prev_lidar2global = data_info['lidar2global']
             metas_seq.append([metas])
-            # load surroundocc label
+            
+            # Generate dummy occupancy for mini dataset since we don't have labels
+            # Create a fake/random occupancy grid for testing
             try:
                 # First try to load real data if available
                 label_file = os.path.join('data/surroundocc', data_info['pts_filename'].split('/')[-1]+'.npy')
@@ -114,11 +196,10 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
                     occ_label[label_idx[:, 0], label_idx[:, 1], label_idx[:, 2]] = label_idx[:, 3]
                 else:
                     # Generate a dummy occupancy grid
-                    print(f"Warning: Occupancy label file {label_file} not found, creating synthetic data")
                     occ_label = np.ones(self.grid_size_occ, dtype=np.int64) * self.empty_idx
                     
                     # Use a seed based on index for reproducibility
-                    np.random.seed(sample_idx + ord(scene_name[0]) if scene_name else 0)
+                    np.random.seed(sample_idx + ord(scene_name[0]))
                     
                     # Add a more meaningful structure (like a road and some objects)
                     # Create a "road" - set bottom layer cells to class 13 (road surface)
@@ -142,7 +223,7 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
                             continue
                         occ_label[x, y, z] = rand_classes[i]
             except Exception as e:
-                print(f"Error loading or generating occupancy grid: {e}")
+                print(f"Error generating occupancy grid: {e}")
                 occ_label = np.ones(self.grid_size_occ, dtype=np.int64) * self.empty_idx
                 
             occ_seq.append(occ_label)
@@ -180,7 +261,9 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
         for cam_type, cam_info in info['cams'].items():
             image_paths.append(cam_info['data_path'])
             # obtain lidar to image transformation matrix
-            lidar2cam_r = np.linalg.inv(cam_info['sensor2lidar_rotation'])
+            # Convert quaternion to rotation matrix first
+            rotation_matrix = Quaternion(cam_info['sensor2lidar_rotation']).rotation_matrix
+            lidar2cam_r = np.linalg.inv(rotation_matrix)
             lidar2cam_t = cam_info['sensor2lidar_translation'] @ lidar2cam_r.T
             lidar2cam_rt = np.eye(4)
             lidar2cam_rt[:3, :3] = lidar2cam_r.T
@@ -212,7 +295,7 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
                     scene_name_table.append(self.scene_names[i])
                     scene_idx_table.append(j)
         else:
-            scene_len = len(self.nusc_infos[scene_name])
+            scene_len = len(self.scene_data[scene_name])
             for j in range(scene_len - self.num_frames + 1):
                 scene_name_table.append(scene_name)
                 scene_idx_table.append(j)

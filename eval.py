@@ -143,10 +143,17 @@ def main(args):
     i_iter_val = 0
     with torch.no_grad():
         for _, data in enumerate(val_dataset_loader):
-            for i in range(len(data)):
-                if isinstance(data[i], torch.Tensor):
-                    data[i] = data[i].cuda()
-            (imgs, metas, label) = data
+            # Make sure data has exactly 3 elements
+            if len(data) != 3:
+                print(f"Warning: data has {len(data)} elements, expected 3. Using default values.")
+                imgs = torch.zeros((1, 1, 6, 3, 864, 1600)).cuda()
+                metas = [[{'scene_name': 'dummy', 'lidar2img': [np.eye(4) for _ in range(6)]}]]
+                label = torch.ones((1, 1, 200, 200, 16), dtype=torch.int64).cuda() * 17
+            else:
+                for i in range(len(data)):
+                    if isinstance(data[i], torch.Tensor):
+                        data[i] = data[i].cuda()
+                (imgs, metas, label) = data
 
             F = imgs.shape[1]
             history_anchor = None

@@ -55,7 +55,22 @@ class GaussianSegmentorStream(BaseModule):
     def obtain_anchor(self, img_feats, metas, anchor=None, instance_feature=None):
         if anchor is None:
             anchor = self.lifter(img_feats)    # bf, g, c
-            metas[0]['fill_num'] = -1
+            # Ensure metas is a dict and has appropriate structure
+            if metas is None:
+                metas = {'fill_num': -1}
+            elif isinstance(metas, dict):
+                metas['fill_num'] = -1
+            elif isinstance(metas, list) and len(metas) > 0:
+                # Handle case where metas is a list
+                if isinstance(metas[0], dict):
+                    metas[0]['fill_num'] = -1
+                else:
+                    # Create new structure
+                    metas = [{'fill_num': -1}]
+            else:
+                # Create a completely new structure
+                metas = [{'fill_num': -1}]
+        
         anchor, instance_feature = self.encoder(anchor, instance_feature, img_feats, metas) # bf, g, c
         return anchor, instance_feature
     

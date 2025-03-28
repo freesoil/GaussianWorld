@@ -136,8 +136,11 @@ class DeformableFeatureAggregation(BaseModule):
         projection_mat = []
         ida_mat = []
         image_wh = []
+
         for meta in metas:
             projection_mat.append(meta['lidar2img'])
+            if 'img_aug_matrix' not in meta:
+                meta['img_aug_matrix'] = np.eye(4)
             ida_mat.append(meta['img_aug_matrix'])
             image_wh.append(meta['img_shape'])
         projection_mat = torch.from_numpy(np.array(

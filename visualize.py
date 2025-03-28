@@ -9,9 +9,14 @@ if os.environ.get('DISP', 'f') == 'f':
 # vdisplay = Xvfb(width=1920, height=1080)
 # vdisplay.start()
 
+
+# After your PyTorch operations and before visualization
+
+
+#os.environ['ETS_TOOLKIT'] = 'qt'
+#os.environ['QT_API'] = 'pyqt5'
 from mayavi import mlab
-import mayavi
-mlab.options.offscreen = offscreen
+#mlab.options.offscreen = offscreen
 print("Set mlab.options.offscreen={}".format(mlab.options.offscreen))
 
 import os, time, argparse, os.path as osp, numpy as np
@@ -31,6 +36,7 @@ from matplotlib import pyplot as plt
 import warnings
 warnings.filterwarnings("ignore")
 
+import open3d as o3d
 
 def plot_opa_hist(opas, save_name):
     plt.cla(); plt.clf()
@@ -91,7 +97,9 @@ def draw(
     ]
     print('occ num:', len(fov_voxels))
     
+    torch.cuda.empty_cache()
     figure = mlab.figure(size=(2560, 1440), bgcolor=(1, 1, 1))
+
     # Draw occupied inside FOV voxels
     voxel_size = sum(voxel_size) / 3
     if not sem:
@@ -169,10 +177,6 @@ def draw(
         scene.camera.compute_view_plane_normal()
         scene.render()
         scene.camera.azimuth(-5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
         scene.render()
         scene.camera.azimuth(5)
         scene.render()
@@ -407,18 +411,52 @@ def main(args):
             for i in range(len(data)):
                 if isinstance(data[i], torch.Tensor):
                     data[i] = data[i].cuda()
-            (imgs, metas, label) = data
-
+            # Extract data with better error handling
+            (imgs, metas, label) = data[:3]
+            print(f"Data unpacked successfully")
+            print(f"imgs type: {type(imgs)}, shape: {imgs.shape if imgs is not None else 'None'}")
+            print(f"metas type: {type(metas)}")
+            print(f"label type: {type(label)}, shape: {label.shape if label is not None else 'None'}")
+            
+            # Debugging info before accessing shape
+            print(f"About to access imgs.shape[1]")
             F = imgs.shape[1]
             history_anchor = None
+            
+            # Handle the metas format based on its structure
+            print(f"Checking metas format")
+            if isinstance(metas, list):
+                print(f"metas is a list of length {len(metas)}")
+                # Ensure metas has enough entries for each frame
+                while len(metas) < F:
+                    print(f"Adding additional metas entry (current: {len(metas)}, needed: {F})")
+                    metas.append(metas[0])  # Duplicate the first entry if needed
+            
             for i in range(F):
+                # Validate and prepare metas for this frame
+                frame_meta = None
+                if isinstance(metas, list):
+                    if i < len(metas):
+                        frame_meta = metas[i]
+                    else:
+                        print(f"Warning: metas list too short, using first entry for frame {i}")
+                        frame_meta = metas[0]
+                else:
+                    print(f"Warning: metas is not a list, using as is for all frames")
+                    frame_meta = metas
+                
+                print(f"Processing frame {i}/{F}")
                 with torch.cuda.amp.autocast(enabled=amp):
-                    result_dict = my_model(imgs=imgs[:, i], metas=metas[0][i], label=label[:, i:i+1], history_anchor=history_anchor)
+                    result_dict = my_model(imgs=imgs[:, i], metas=frame_meta, label=label[:, i:i+1], history_anchor=history_anchor)
+                print(f"Model processing successful for frame {i}")
+
+                
                 if args.stream_test:
                     history_anchor = result_dict['history_anchor']
+                
                 loss, loss_dict = loss_func(result_dict)
-            
                 loss_record.update(loss=loss.item(), loss_dict=loss_dict)
+                
                 voxel_predict = result_dict['ce_input'].argmax(dim=1).long()
                 voxel_label = result_dict['ce_label'].long()
                 iou_predict = ((voxel_predict > 0) & (voxel_predict < 17)).long()
@@ -427,31 +465,41 @@ def main(args):
                 CalMeanIou_geo.addBatch(iou_predict, iou_label)
 
                 frame_idx = i
-
+                
+                print(f"Successfully processed results for frame {i}")
                 # vis occ
                 if args.vis_occ:
+                    print(f"Starting visualization for frame {frame_idx}")
+                    # Check that ce_input is available and has expected dimension
+                    if 'ce_input' not in result_dict:
+                        print(f"Warning: ce_input not found in result_dict for frame {frame_idx}")
+                        continue
+                        
+                    if len(result_dict['ce_input']) == 0:
+                        print(f"Warning: ce_input is empty for frame {frame_idx}")
+                        continue
+                    
+                    print(f"ce_input shape: {result_dict['ce_input'][-1].shape}")
                     voxel_predict = torch.argmax(result_dict['ce_input'][-1], dim=0).long()
+                    print(f"voxel_predict shape: {voxel_predict.shape}")
+                    
                     voxel_label = result_dict['ce_label'][-1].long()
+                    print(f"voxel_label shape: {voxel_label.shape}")
+                    
                     voxel_origin = cfg.pc_range[:3]
                     resolution = 0.4
                     voxel_predict[voxel_predict==0] = 17
                     to_vis = voxel_predict.clone().cpu().numpy()
                     save_path = os.path.join(save_dir, f'occ_frame_{frame_idx}.png')
-                    draw(to_vis, 
-                        None,
-                        voxel_origin, 
+                    print(f"Saving visualization to {save_path}")
+                    
+                    visualize_with_open3d(to_vis, 
                         [resolution] * 3, 
                         sem=True,
                         save_path=save_path)
-                    # voxel_label[voxel_label==0] = 17
-                    # to_vis = voxel_label.clone().cpu().numpy()
-                    # save_path = os.path.join(save_dir, f'occ_gt_frame_{frame_idx}.png')
-                    # draw(to_vis, 
-                    #     None,
-                    #     voxel_origin, 
-                    #     [resolution] * 3, 
-                    #     sem=True,
-                    #     save_path=save_path)
+                        
+                    print(f"Visualization completed for frame {frame_idx}")
+                    
             
             if i_iter_val % 1 == 0 and is_main_process():
                 loss_info = loss_record.loss_info()
@@ -467,6 +515,94 @@ def main(args):
     logger.info(f'Current val iou of sem is {info_sem}')
     logger.info(f'Current val iou of geo is {info_geo}')
         
+
+def visualize_with_open3d(fov_voxels, voxel_size, sem=False, save_path="visualization.png"):
+    """
+    Visualize voxels using Open3D and save to an image file
+    """
+    # Clear CUDA cache
+    torch.cuda.empty_cache()
+    
+    # Create a visualization window
+    vis = o3d.visualization.Visualizer()
+    vis.create_window(width=2560, height=1440, visible=False)  # Hidden window for headless rendering
+    
+    # Set white background
+    #opt = vis.get_render_option()
+    #opt.background_color = np.array([1.0, 1.0, 1.0])
+    
+    # Average voxel size
+    voxel_size_avg = sum(voxel_size) / 3
+    
+    # Create a point cloud from voxel centers
+    pcd = o3d.geometry.PointCloud()
+    
+    # Use the first 3 columns as XYZ coordinates
+    fov_voxels = fov_voxels.reshape((-1, fov_voxels.shape[-1]))
+    points = fov_voxels[:, :3].copy()
+    if sem:
+        # Flip Y coordinates if needed
+        points[:, 1] = -points[:, 1]
+    
+    pcd.points = o3d.utility.Vector3dVector(points)
+    
+    # Set colors based on the 4th column (class or occupancy value)
+    import matplotlib.pyplot as plt
+    if sem:
+        # For semantic classes, create a color map
+        max_class = 16
+        colors = []
+        cmap = plt.get_cmap('tab20')  # Using a categorical colormap
+        
+        for val in fov_voxels[:, 3]:
+            # Normalize to [0, 1] range for the colormap
+            norm_val = val / max_class
+            colors.append(cmap(norm_val)[:3])  # RGB values
+    else:
+        # For occupancy values, use a continuous colormap
+        colors = []
+        cmap = plt.get_cmap('jet')
+        
+        # Normalize values for colormap
+        min_val = np.min(fov_voxels[:, 3])
+        max_val = np.max(fov_voxels[:, 3])
+        norm_vals = (fov_voxels[:, 3] - min_val) / (max_val - min_val + 1e-10)
+        
+        for val in norm_vals:
+            colors.append(cmap(val)[:3])  # RGB values
+    
+    pcd.colors = o3d.utility.Vector3dVector(np.array(colors))
+    
+    # Add voxel grid visualization
+    # Method 1: Create voxel grid from point cloud
+    voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
+        pcd, voxel_size=voxel_size_avg
+    )
+    vis.add_geometry(voxel_grid)
+    
+    # Alternative Method 2: Add cubes for each voxel
+    # for i in range(len(points)):
+    #     cube = o3d.geometry.TriangleMesh.create_box(width=voxel_size_avg, 
+    #                                                height=voxel_size_avg, 
+    #                                                depth=voxel_size_avg)
+    #     cube.translate(points[i] - np.array([voxel_size_avg/2, voxel_size_avg/2, voxel_size_avg/2]))
+    #     cube.paint_uniform_color(colors[i])
+    #     vis.add_geometry(cube)
+    
+    # Set view control
+    #view_control = vis.get_view_control()
+    #view_control.set_zoom(0.8)
+    
+    # Render and capture image
+    vis.poll_events()
+    vis.update_renderer()
+    img = vis.capture_screen_image(save_path, do_render=True)
+    
+    # Close visualization
+    vis.destroy_window()
+    
+    print(f"Visualization saved to {save_path}")
+    return
 
 if __name__ == '__main__':
     # Training settings
