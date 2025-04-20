@@ -28,7 +28,7 @@ scale_range = [0.08, 0.64]
 image_size = [864, 1600]
 resize_lim = [1.0, 1.0]
 flip = True
-num_frames = 38
+num_frames = 8
 temporal_feat_dim = 0
 temporal_scale = 1.0
 dynamic_scale = 1.0
@@ -225,7 +225,7 @@ data_path = 'data/nuscenes/'
 train_dataset_config = dict(
     type='NuScenes_Scene_SurroundOcc_Dataset_Stream',
     data_path = data_path,
-    num_frames = 38,
+    num_frames = 8,
     imageset = 'data/nuscenes_temporal_infos_train.pkl',
     phase='train',
 )
@@ -233,7 +233,7 @@ train_dataset_config = dict(
 val_dataset_config = dict(
     type='NuScenes_Scene_SurroundOcc_Dataset_Stream',
     data_path = data_path,
-    num_frames = 38,
+    num_frames = 8,
     imageset = 'data/nuscenes_temporal_infos_val.pkl',
     phase='val',
 )
