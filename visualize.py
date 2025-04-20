@@ -1,23 +1,15 @@
 import os
-offscreen = False
-if os.environ.get('DISP', 'f') == 'f':
-    from pyvirtualdisplay import Display
-    display = Display(visible=False, size=(2560, 1440))
-    display.start()
-    offscreen = True
-# from xvfbwrapper import Xvfb
-# vdisplay = Xvfb(width=1920, height=1080)
-# vdisplay.start()
+# Force matplotlib to use Agg backend for offscreen rendering
+import matplotlib
+matplotlib.use('Agg')
 
-from mayavi import mlab
-import mayavi
-mlab.options.offscreen = offscreen
-print("Set mlab.options.offscreen={}".format(mlab.options.offscreen))
-
-import os, time, argparse, os.path as osp, numpy as np
+# Import other dependencies
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
 import torch
 import torch.distributed as dist
-# os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+import time, argparse, os.path as osp
 
 from utils.iou_eval import IOUEvalBatch
 from utils.loss_record import LossRecord
@@ -26,8 +18,8 @@ from utils.load_save_util import revise_ckpt, revise_ckpt_2
 from mmengine import Config
 from mmengine.runner import set_random_seed
 from mmengine.logging.logger import MMLogger
-from matplotlib import pyplot as plt
 
+# Suppress various warnings
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -64,15 +56,12 @@ def draw(
     voxels=None,          # semantic occupancy predictions
     gauss=None,           # semantic gaussians
     vox_origin=None,
-    voxel_size=0.2,  # voxel size in the real world
+    voxel_size=0.2,       # voxel size in the real world
     sem=False,
     save_path=None
 ):
     if voxels is not None:
         w, h, z = voxels.shape
-        # grid = grid.astype(np.int)
-        # voxels[98:102, 95:105, 8:10] = 0
-
         # Compute the voxels coordinates
         grid_coords = get_grid_coords(
             [voxels.shape[0], voxels.shape[1], voxels.shape[2]], voxel_size
@@ -91,201 +80,96 @@ def draw(
     ]
     print('occ num:', len(fov_voxels))
     
-    figure = mlab.figure(size=(2560, 1440), bgcolor=(1, 1, 1))
-    # Draw occupied inside FOV voxels
-    voxel_size = sum(voxel_size) / 3
-    if not sem:
-        plt_plot_fov = mlab.points3d(
-            fov_voxels[:, 0],
-            fov_voxels[:, 1],
-            fov_voxels[:, 2],
-            fov_voxels[:, 3],
-            colormap="jet",
-            scale_factor=1.0 * voxel_size,
-            mode="cube",
-            opacity=1.0,
-            # transparent=True,
-            # vmin=1,
-            # vmax=40, # 16
-        )
-    else:
-        plt_plot_fov = mlab.points3d(
-            fov_voxels[:, 0],
-            -fov_voxels[:, 1],
-            fov_voxels[:, 2],
-            fov_voxels[:, 3],
-            scale_factor=1.0 * voxel_size,
-            mode="cube",
-            opacity=1.0,
-            # transparent=True,
-            vmin=0,
-            vmax=16, # 16
-        )
-
-    plt_plot_fov.glyph.scale_mode = "scale_by_vector"
-    if sem:
-        colors = np.array(
-            [
-                [  0,   0,   0, 255],       # others
-                [255, 120,  50, 255],       # barrier              orange
-                [255, 192, 203, 255],       # bicycle              pink
-                [255, 255,   0, 255],       # bus                  yellow
-                [  0, 150, 245, 255],       # car                  blue
-                [  0, 255, 255, 255],       # construction_vehicle cyan
-                [255, 127,   0, 255],       # motorcycle           dark orange
-                [255,   0,   0, 255],       # pedestrian           red
-                [255, 240, 150, 255],       # traffic_cone         light yellow
-                [135,  60,   0, 255],       # trailer              brown
-                [160,  32, 240, 255],       # truck                purple                
-                [255,   0, 255, 255],       # driveable_surface    dark pink
-                # [175,   0,  75, 255],       # other_flat           dark red
-                [139, 137, 137, 255],
-                [ 75,   0,  75, 255],       # sidewalk             dard purple
-                [150, 240,  80, 255],       # terrain              light green          
-                [230, 230, 250, 255],       # manmade              white
-                [  0, 175,   0, 255],       # vegetation           green
-                # [  0, 255, 127, 255],       # ego car              dark cyan
-                # [255,  99,  71, 255],       # ego car
-                # [  0, 191, 255, 255]        # ego car
-            ]
-        ).astype(np.uint8)
-        plt_plot_fov.module_manager.scalar_lut_manager.lut.table = colors
+    # Define class colors
+    colors = np.array([
+        [0.0, 0.0, 0.0],       # others
+        [1.0, 0.47, 0.2],      # barrier              orange
+        [1.0, 0.75, 0.8],      # bicycle              pink
+        [1.0, 1.0, 0.0],       # bus                  yellow
+        [0.0, 0.59, 0.96],     # car                  blue
+        [0.0, 1.0, 1.0],       # construction_vehicle cyan
+        [1.0, 0.5, 0.0],       # motorcycle           dark orange
+        [1.0, 0.0, 0.0],       # pedestrian           red
+        [1.0, 0.94, 0.59],     # traffic_cone         light yellow
+        [0.53, 0.23, 0.0],     # trailer              brown
+        [0.63, 0.12, 0.94],    # truck                purple                
+        [1.0, 0.0, 1.0],       # driveable_surface    dark pink
+        [0.54, 0.54, 0.54],    # other
+        [0.29, 0.0, 0.29],     # sidewalk             dark purple
+        [0.59, 0.94, 0.31],    # terrain              light green          
+        [0.9, 0.9, 0.98],      # manmade              white
+        [0.0, 0.69, 0.0],      # vegetation           green
+    ])
     
-    scene = figure.scene
-    if True:
-        scene.camera.position = [  -35.08337438, 7.5131739, 16.71378558]
-        scene.camera.focal_point = [  -34.21734897, 7.5131739, 16.21378558]
-        scene.camera.view_angle = 40.0
-        scene.camera.view_up = [0.0, 0.0, 1.0]
-        scene.camera.clipping_range = [0.01, 300.]
-        scene.camera.compute_view_plane_normal()
-        scene.render()
-    else:
-        scene.camera.position = [118.7195754824976, 118.70290907014409, 120.11124225247899]
-        scene.camera.focal_point = [0.008333206176757812, -0.008333206176757812, 1.399999976158142]
-        scene.camera.view_angle = 30.0
-        scene.camera.view_up = [0.0, 0.0, 1.0]
-        scene.camera.clipping_range = [114.42016931210819, 320.9039783052695]
-        scene.camera.compute_view_plane_normal()
-        scene.render()
-        scene.camera.azimuth(-5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(5)
-        scene.render()
-        scene.camera.azimuth(-5)
-        scene.render()
-        scene.camera.position = [-138.7379881436844, -0.008333206176756428, 99.5084646673331]
-        scene.camera.focal_point = [0.008333206176757812, -0.008333206176757812, 1.399999976158142]
-        scene.camera.view_angle = 30.0
-        scene.camera.view_up = [0.0, 0.0, 1.0]
-        scene.camera.clipping_range = [104.37185230017721, 252.84608651497263]
-        scene.camera.compute_view_plane_normal()
-        scene.render()
-        scene.camera.position = [-114.65804807470022, -0.008333206176756668, 82.48137575398867]
-        scene.camera.focal_point = [0.008333206176757812, -0.008333206176757812, 1.399999976158142]
-        scene.camera.view_angle = 30.0
-        scene.camera.view_up = [0.0, 0.0, 1.0]
-        scene.camera.clipping_range = [75.17498702830105, 222.91192666552377]
-        scene.camera.compute_view_plane_normal()
-        scene.render()
-        scene.camera.position = [-94.75727115818437, -0.008333206176756867, 68.40940144543957]
-        scene.camera.focal_point = [0.008333206176757812, -0.008333206176757812, 1.399999976158142]
-        scene.camera.view_angle = 30.0
-        scene.camera.view_up = [0.0, 0.0, 1.0]
-        scene.camera.clipping_range = [51.04534630774225, 198.1729515833347]
-        scene.camera.compute_view_plane_normal()
-        scene.render()
-        scene.camera.elevation(5)
-        scene.camera.orthogonalize_view_up()
-        scene.render()
-        scene.camera.position = [-107.15500034628069, -0.008333206176756742, 92.16667026873841]
-        scene.camera.focal_point = [0.008333206176757812, -0.008333206176757812, 1.399999976158142]
-        scene.camera.view_angle = 30.0
-        scene.camera.view_up = [0.6463156430702276, -6.454925414290924e-18, 0.7630701733934554]
-        scene.camera.clipping_range = [78.84362692774403, 218.2948716014858]
-        scene.camera.compute_view_plane_normal()
-        scene.render()
-        scene.camera.position = [-107.15500034628069, -0.008333206176756742, 92.16667026873841]
-        scene.camera.focal_point = [0.008333206176757812, -0.008333206176757812, 1.399999976158142]
-        scene.camera.view_angle = 30.0
-        scene.camera.view_up = [0.6463156430702277, -6.4549254142909245e-18, 0.7630701733934555]
-        scene.camera.clipping_range = [78.84362692774403, 218.2948716014858]
-        scene.camera.compute_view_plane_normal()
-        scene.render()
-        scene.camera.elevation(5)
-        scene.camera.orthogonalize_view_up()
-        scene.render()
-        scene.camera.elevation(5)
-        scene.camera.orthogonalize_view_up()
-        scene.render()
-        scene.camera.elevation(-5)
-        mlab.pitch(-8)
-        mlab.move(up=15)
-        scene.camera.orthogonalize_view_up()
-        scene.render()
-
-    if offscreen:
-        mlab.savefig(save_path, size=(2560, 1440))
-    else:
-        mlab.show()
-    # mlab.savefig(save_path)
-    mlab.close()
+    # Downsample points if there are too many (matplotlib struggles with large point clouds)
+    max_points = 15000
+    if len(fov_voxels) > max_points:
+        print(f"Downsampling from {len(fov_voxels)} to {max_points} points")
+        indices = np.random.choice(len(fov_voxels), max_points, replace=False)
+        fov_voxels = fov_voxels[indices]
+    
+    # Create 3D plot
+    fig = plt.figure(figsize=(10, 8), dpi=100)
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Set background color to white
+    ax.set_facecolor('white')
+    fig.patch.set_facecolor('white')
+    
+    # Plot points with colors based on class labels
+    classes = fov_voxels[:, 3].astype(int)
+    
+    # Set view angle (similar to the original mayavi view)
+    ax.view_init(elev=30, azim=-60)
+    
+    # Use scatter plot for better performance
+    for cls in np.unique(classes):
+        mask = classes == cls
+        if np.sum(mask) > 0:
+            if cls < len(colors):
+                color = colors[cls]
+                class_name = f"Class {cls}"
+                ax.scatter(
+                    fov_voxels[mask, 0], 
+                    fov_voxels[mask, 1] * (-1 if sem else 1), 
+                    fov_voxels[mask, 2],
+                    c=[color], 
+                    s=5,  # Smaller point size for better visibility
+                    marker='o',
+                    alpha=0.8,
+                    label=class_name
+                )
+    
+    # Set limits and labels
+    max_range = np.array([
+        fov_voxels[:, 0].max() - fov_voxels[:, 0].min(),
+        fov_voxels[:, 1].max() - fov_voxels[:, 1].min(),
+        fov_voxels[:, 2].max() - fov_voxels[:, 2].min()
+    ]).max() / 2.0
+    
+    mid_x = (fov_voxels[:, 0].max() + fov_voxels[:, 0].min()) / 2
+    mid_y = (fov_voxels[:, 1].max() + fov_voxels[:, 1].min()) / 2
+    mid_z = (fov_voxels[:, 2].max() + fov_voxels[:, 2].min()) / 2
+    
+    ax.set_xlim(mid_x - max_range, mid_x + max_range)
+    ax.set_ylim(mid_y - max_range, mid_y + max_range)
+    ax.set_zlim(mid_z - max_range, mid_z + max_range)
+    
+    # Remove ticks and axis labels for cleaner visualization
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+    ax.set_axis_off()
+    
+    # Save figure
+    plt.tight_layout()
+    try:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Successfully saved visualization to {save_path}")
+    except Exception as e:
+        print(f"Error saving visualization: {e}")
+    
+    plt.close(fig)
 
 def pass_print(*args, **kwargs):
     pass
