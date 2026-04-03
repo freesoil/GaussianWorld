@@ -22,35 +22,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
 
 # Install pip for Python 3.8
-RUN wget https://bootstrap.pypa.io/get-pip.py && python get-pip.py && rm get-pip.py
+RUN wget https://bootstrap.pypa.io/pip/3.8/get-pip.py && python get-pip.py && rm get-pip.py
 
 # Install PyTorch 2.0.0 (compiled for CUDA 11.8)
-RUN pip install torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1 \
+RUN python -m pip install torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1 \
     --index-url https://download.pytorch.org/whl/cu118
 
 # Install MMlab ecosystem
-RUN pip install openmim \
- && mim install mmcv==2.0.1 \
- && mim install mmdet==3.0.0 \
- && mim install mmsegmentation==1.0.0 \
- && mim install mmdet3d==1.1.1
+RUN python -m pip install openmim \
+ && python -m mim install mmcv==2.0.1 \
+ && python -m mim install mmdet==3.0.0 \
+ && python -m mim install mmsegmentation==1.0.0 \
+ && python -m mim install mmdet3d==1.1.1
 
 # Install additional required packages
-RUN pip install spconv-cu117 \
- && pip install timm \
- && pip install git+https://github.com/NVIDIA/gpu_affinity
+RUN python -m pip install spconv-cu117 \
+ && python -m pip install timm \
+ && python -m pip install git+https://github.com/NVIDIA/gpu_affinity
 
 # Optional visualization tools
 # RUN pip install pyvirtualdisplay matplotlib==3.7.2 PyQt5 \
 #     vtk==9.0.1 mayavi==4.7.3 configobj numpy==1.23.5
 
 # Step 1: Install VTK first
-RUN pip install vtk==9.0.1
+RUN python -m pip install vtk==9.0.1
 
 # Step 2: Then install Mayavi (and rest)
-RUN pip install pyvirtualdisplay matplotlib==3.5.3 PyQt5  configobj numpy==1.23.5
+RUN python -m pip install pyvirtualdisplay matplotlib==3.5.3 PyQt5  configobj numpy==1.23.5
 
-RUN pip install mayavi==4.7.3
+RUN python -m pip install mayavi==4.7.3
 
 # Set working directory and copy code
 WORKDIR /workspace
@@ -65,11 +65,11 @@ RUN CUDA_HOME=/usr/local/cuda \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
     CFLAGS="-I/usr/local/cuda/include" \
     CXXFLAGS="-I/usr/local/cuda/include" \
-    pip install -e /workspace/model/encoder/gaussian_encoder/ops
+    python -m pip install -e /workspace/model/encoder/gaussian_encoder/ops
 
 # RUN cd /workspace/model/encoder/gaussian_encoder/ops && pip install -e . 
 
-RUN cd /workspace/model/head/localagg && pip install -e . 
+RUN cd /workspace/model/head/localagg && python -m pip install -e .
 
 # Default container entry
 CMD ["/bin/bash"]

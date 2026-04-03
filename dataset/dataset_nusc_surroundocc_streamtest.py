@@ -5,6 +5,11 @@ import pickle
 from mmcv.image.io import imread
 from pyquaternion import Quaternion
 from . import OPENOCC_DATASET
+from .path_utils import (
+    dummy_surroundocc_enabled,
+    resolve_nuscenes_data_path,
+    resolve_under_data_root,
+)
 
 
 @OPENOCC_DATASET.register_module()
@@ -23,7 +28,7 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
             data = pickle.load(f)
 
         self.nusc_infos = data['infos']
-        self.data_path = data_path
+        self.data_path = resolve_nuscenes_data_path(data_path)
         self.num_frames = num_frames
         self.grid_size_occ = np.array(grid_size_occ).astype(np.uint32)
         self.empty_idx = empty_idx
@@ -50,7 +55,8 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
             # load image
             imgs = []
             for filename in data_info['img_filename']:
-                imgs.append(imread(filename, 'unchanged').astype(np.float32))
+                p = resolve_under_data_root(self.data_path, filename)
+                imgs.append(imread(p, 'unchanged').astype(np.float32))
             imgs_seq.append(np.stack(imgs, 0))
             # load metas
             metas = {'scene_name': scene_name}
@@ -60,10 +66,16 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
             prev_lidar2global = data_info['lidar2global']
             metas_seq.append([metas])
             # load surroundocc label
-            label_file = os.path.join('data/surroundocc', data_info['pts_filename'].split('/')[-1]+'.npy')
-            label_idx = np.load(label_file)
-            occ_label = np.ones(self.grid_size_occ, dtype=np.int64) * self.empty_idx
-            occ_label[label_idx[:, 0], label_idx[:, 1], label_idx[:, 2]] = label_idx[:, 3]
+            if dummy_surroundocc_enabled():
+                occ_label = np.ones(self.grid_size_occ, dtype=np.int64) * self.empty_idx
+            else:
+                label_file = os.path.join(
+                    'data/surroundocc',
+                    data_info['pts_filename'].split('/')[-1] + '.npy',
+                )
+                label_idx = np.load(label_file)
+                occ_label = np.ones(self.grid_size_occ, dtype=np.int64) * self.empty_idx
+                occ_label[label_idx[:, 0], label_idx[:, 1], label_idx[:, 2]] = label_idx[:, 3]
             occ_seq.append(occ_label)
 
         imgs = np.stack(imgs_seq, 0)    # F, N, H, W, C

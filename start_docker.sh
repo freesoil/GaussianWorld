@@ -4,6 +4,7 @@ docker run  --network host \
   -e NVIDIA_DRIVER_CAPABILITIES=all \
   --privileged \
   -v $(pwd):/workspace \
+  -v $(pwd)/../data:/workspace/data \
   --shm-size=100G \
   -w /workspace \
   gaussianworld \
