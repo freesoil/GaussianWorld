@@ -12,6 +12,22 @@ from .path_utils import (
 )
 
 
+def _to_numpy(obj):
+    """Convert nested lists to numpy arrays"""
+    if isinstance(obj, list):
+        if len(obj) > 0 and all(isinstance(x, (int, float)) for x in obj):
+            return np.array(obj, dtype=np.float64)
+        elif len(obj) > 0 and all(isinstance(x, list) for x in obj):
+            return np.array(obj, dtype=np.float64)
+        else:
+            return [_to_numpy(x) for x in obj]
+    elif isinstance(obj, dict):
+        return {k: _to_numpy(v) for k, v in obj.items()}
+    elif isinstance(obj, tuple):
+        return tuple(_to_numpy(x) for x in obj)
+    return obj
+
+
 @OPENOCC_DATASET.register_module()
 class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
     def __init__(
@@ -26,6 +42,9 @@ class NuScenes_Scene_SurroundOcc_Dataset_StreamTest(data.Dataset):
         ):
         with open(imageset, 'rb') as f:
             data = pickle.load(f)
+
+        # Convert lists to numpy arrays for compatibility
+        data['infos'] = _to_numpy(data['infos'])
 
         self.nusc_infos = data['infos']
         self.data_path = resolve_nuscenes_data_path(data_path)
