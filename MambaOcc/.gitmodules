@@ -1,4 +1,0 @@
-[submodule "VMamba"]
-    path = VMamba
-    url = https://github.com/MzeroMiko/VMamba.git
-    ignore = all
