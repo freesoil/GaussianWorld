@@ -220,7 +220,7 @@ loss = dict(
     ]
 )
 
-data_path = 'data/nuscenes/'
+data_path = './'
 
 train_dataset_config = dict(
     type='NuScenes_Scene_SurroundOcc_Dataset_StreamTest',
@@ -234,7 +234,7 @@ val_dataset_config = dict(
     type='NuScenes_Scene_SurroundOcc_Dataset_StreamTest',
     data_path = data_path,
     num_frames = num_frames,
-    imageset = 'data/nuscenes_temporal_infos_val.pkl',
+    imageset = 'data/nuscenes_mini_temporal_infos_val.pkl',
     phase='val',
 )
 
