@@ -1,0 +1,7 @@
+mmdetection3d
+mmdeploy
+data
+.git
+**/__pycache__
+*.pyc
+work_dirs

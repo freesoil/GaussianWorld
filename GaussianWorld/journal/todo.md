@@ -1,0 +1,5 @@
+# Todo
+- [ ] Get nuScenes-mini/nuScenes subset staged in `data/` (or another shared location) and note the full path for mounting into the containers for FlashOCC and MambaOcc runs.
+- [ ] For FlashOCC: run `../FlashOCC/build.sh` (already done) then launch the container with the nuScenes path mounted, run `tools/compile_model.sh` (if needed), download the `flashocc-r50-256x704.pth` checkpoint from the provided GDrive link, and finally invoke the quick test script (e.g., the commands from `doc/mmdeploy_test.md`) against the nuScenes-mini frames.
+- [ ] For MambaOcc: start the container from the `mambaocc` image, run `compile_ops.sh`/`tools/compile_model.sh` in the image, place the required checkpoints under `pretrained_model/`, and execute the evaluation script (e.g., `tools/dist_test.sh` or a lightweight demo) using the same nuScenes-mini data.
+- [ ] Capture logs/metrics from both tests, compare any runtime errors against `GaussianWorld`, and document dependency tweaks so the workflow is reproducible.

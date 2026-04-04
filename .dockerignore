@@ -1,0 +1,8 @@
+# For docker/Dockerfile.legacy-occ (build from worldocc root)
+.git
+**/__pycache__
+**/*.pyc
+GaussianWorld
+**/data
+**/work_dirs
+**/mmdetection3d

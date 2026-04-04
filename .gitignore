@@ -1,0 +1,47 @@
+# Python / general
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.dll
+*.egg-info/
+.venv*/
+.env
+
+# Build artifacts
+build/
+dist/
+*.o
+*.a
+*.pkl
+
+# Caches
+.mypy_cache/
+.pytest_cache/
+.cache/
+
+# Large data / checkpoints
+**/data/**
+**/dataset/**
+**/weights/**
+**/ckpts/**
+**/checkpoints/**
+**/pretrained_model/**
+**/pretrain/**
+**/out/**
+**/work_dirs/**
+**/logs/**
+**/wandb/**
+
+# Model binaries
+**/*.pth
+**/*.ckpt
+**/*.pt
+**/*.onnx
+**/*.engine
+
+# Archives
+**/*.zip
+**/*.tar
+**/*.tar.gz
+**/*.7z

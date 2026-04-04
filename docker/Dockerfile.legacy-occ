@@ -1,0 +1,86 @@
+# Shared legacy stack for FlashOCC and MambaOcc (mmcv-full 1.5.3, mmdet 2.25.1, mmdet3d v1.0.0rc4).
+# PyTorch 1.12.1+cu113 is used for both (MambaOcc README); FlashOCC docs use 1.10.x but 1.12 usually works.
+#
+# Build from this repository root (worldocc/), not from FlashOCC/ or MambaOcc/ alone:
+#
+#   docker build -f docker/Dockerfile.legacy-occ --build-arg PROJECT=FlashOCC -t flashocc-legacy .
+#   docker build -f docker/Dockerfile.legacy-occ --build-arg PROJECT=MambaOcc  -t mambaocc-legacy .
+#
+# Run (example):
+#   docker run --gpus all -it -v "$(pwd)/FlashOCC:/workspace/FlashOCC" flashocc-legacy bash
+#   docker run --gpus all -it -v "$(pwd)/MambaOcc:/workspace/MambaOcc"  mambaocc-legacy bash
+
+ARG PROJECT=FlashOCC
+
+FROM nvidia/cuda:11.3.1-cudnn8-devel-ubuntu20.04
+
+ARG PROJECT
+ENV OCC_PROJECT=${PROJECT}
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+ENV FORCE_CUDA=1
+# Avoid mmcv build failure when no GPU is present at image build time.
+ENV TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.8 python3.8-dev python3.8-distutils wget curl git \
+    build-essential ninja-build libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender1 \
+    python3-dev libevent-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1 \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 1
+
+RUN wget -q https://bootstrap.pypa.io/pip/3.8/get-pip.py -O /tmp/get-pip.py \
+    && python3.8 /tmp/get-pip.py && rm /tmp/get-pip.py
+
+RUN python3.8 -m pip install --no-cache-dir \
+    torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 \
+    -f https://download.pytorch.org/whl/cu113/torch_stable.html
+
+RUN python3.8 -m pip install --no-cache-dir openmim \
+    && python3.8 -m mim install mmcv-full==1.5.3 \
+    && python3.8 -m pip install --no-cache-dir \
+        mmdet==2.25.1 mmsegmentation==0.25.0 mmengine==0.10.1
+
+RUN python3.8 -m pip install --no-cache-dir \
+    lyft_dataset_sdk nuscenes-devkit plyfile scikit-image tensorboard trimesh==2.35.39 \
+    networkx==2.2 numba==0.53.0 numpy==1.23.5 setuptools==59.5.0 yapf==0.40.1 pycuda einops
+
+# MambaOcc-only Python deps
+RUN if [ "$OCC_PROJECT" = "MambaOcc" ]; then \
+      python3.8 -m pip install --no-cache-dir \
+        triton timm==0.4.12 chardet yacs submitit tensorboardX fvcore seaborn ipdb; \
+    fi
+
+# FlashOCC: spconv for BEV / occupancy paths
+RUN if [ "$OCC_PROJECT" = "FlashOCC" ]; then \
+      python3.8 -m pip install --no-cache-dir 'spconv-cu113>=2.3,<2.4' \
+      || python3.8 -m pip install --no-cache-dir spconv==2.3.6; \
+    fi
+
+WORKDIR /workspace/${PROJECT}
+COPY ${PROJECT} /workspace/${PROJECT}/
+
+RUN git clone --depth 1 --branch v1.0.0rc4 \
+    https://github.com/open-mmlab/mmdetection3d.git /workspace/${PROJECT}/mmdetection3d \
+    && cd /workspace/${PROJECT}/mmdetection3d \
+    && python3.8 -m pip install --no-cache-dir -v -e .
+
+# MambaOcc: VMamba + DCNv3
+RUN if [ "$OCC_PROJECT" = "MambaOcc" ]; then \
+      if [ ! -f /workspace/MambaOcc/VMamba/kernels/selective_scan/setup.py ]; then \
+        rm -rf /workspace/MambaOcc/VMamba && \
+        git clone --depth 1 https://github.com/MzeroMiko/VMamba.git /workspace/MambaOcc/VMamba; \
+      fi \
+      && cd /workspace/MambaOcc/VMamba/kernels/selective_scan \
+      && python3.8 -m pip install --no-cache-dir -v . \
+      && cd /workspace/MambaOcc/ops_dcnv3 && python3.8 setup.py install; \
+    fi
+
+RUN cd /workspace/${OCC_PROJECT}/projects && python3.8 -m pip install --no-cache-dir -v -e .
+
+WORKDIR /workspace/${OCC_PROJECT}
+CMD ["/bin/bash"]
